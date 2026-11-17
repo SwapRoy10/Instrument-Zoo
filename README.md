@@ -16,7 +16,7 @@ Explore every instrument of the **symphony orchestra** and the **wind ensemble**
 | Percussion | Snare Drum |
 | Keyboards | Grand Piano |
 
-Use the **All / Orchestra / Wind Ensemble** filter to see each ensemble's line-up.
+Use the **All Instruments / Orchestra / Wind Ensemble** tabs at the top to see each ensemble's line-up, then move through it with the arched previews on either side of the stage (or the ← / → keys). The **Catalogue** lists the whole line-up for jumping straight to an instrument.
 
 ## Run it locally
 
@@ -33,8 +33,8 @@ Then open http://localhost:5173. There is nothing to install. Three.js (r170) lo
 | Rotate / zoom / pan | Drag / scroll or pinch / right-drag |
 | Select a part | Click it in 3D or in the Anatomy panel |
 | Step through parts | ↑ / ↓ |
-| Previous / next instrument | ← / → |
-| Search instruments | / |
+| Previous / next instrument | ← / → or the side previews |
+| Open the catalogue | C |
 | Back to overview | Esc |
 | Fade everything else | **Isolate** (or I) |
 
@@ -44,8 +44,8 @@ Every view has a shareable link, such as `#/bassoon/bocal` or `#/piano/hammers`.
 
 ```
 index.html                  page shell + import map for three.js
-css/style.css               glass UI, section colour themes, light & dark, responsive layouts
-js/main.js                  browser, filters, search, thumbnails, panel, deep links, keyboard
+css/style.css               classical paper theme, section colours, transitions, responsive layouts
+js/main.js                  ensemble tabs, carousel transitions, previews, catalogue, notes, deep links
 js/viewer.js                3D stage: studio lighting, framing, camera flights, picking, thumbnails
 js/lib/helpers.js           geometry helpers (tapered tubes, bells, keywork, outlines, instancing)
 js/lib/textures.js          procedural tileable textures (wood grain, flamed maple, metal smudges, felt)
@@ -61,7 +61,7 @@ The models are built entirely in code, with no model files to download. Realism 
 - environment lighting with Khronos PBR Neutral tone mapping;
 - soft shadows plus a contact shadow under each instrument.
 
-Thumbnails in the instrument browser are rendered on the fly by a second off-screen renderer and cached in the browser.
+The preview and catalogue thumbnails are rendered on the fly by a second off-screen renderer and cached in the browser.
 
 ## Adding an instrument
 
