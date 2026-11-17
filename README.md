@@ -16,7 +16,7 @@ Explore every instrument of the **symphony orchestra** and the **wind ensemble**
 | Percussion | Snare Drum |
 | Keyboards | Grand Piano |
 
-Use the **All Instruments / Orchestra / Wind Ensemble** tabs at the top to see each ensemble's line-up, then move through it with the arched previews on either side of the stage (or the ← / → keys). The **Catalogue** lists the whole line-up for jumping straight to an instrument.
+Use the **All Instruments / Orchestra / Wind Ensemble** tabs at the top to see each ensemble's line-up, then move through it with the faded preview cards on either side of the stage (or the ← / → keys). The clicked preview grows into the spotlight while the current instrument shrinks into the opposite slot, then the live 3D model fades in over the picture. The **Catalogue** lists the whole line-up for jumping straight to an instrument.
 
 ## Run it locally
 

@@ -31,6 +31,7 @@ const SLIDE = 24; // % of the stage width an instrument travels during a transit
 // State & elements
 // ===========================================================================
 const app = $('#app');
+const stageEl = $('#stage');
 const viewerEl = $('#viewer');
 const notesInner = $('#notes-inner');
 const plaque = $('#plaque');
@@ -48,6 +49,8 @@ let current = null;
 let selected = null;
 let busy = false;
 let pending = null;
+let insets = { left: 0, right: 0, top: 0, bottom: 0 };
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 const lineup = () => (filter === 'all' ? instruments : instruments.filter((i) => i.ensembles.includes(filter)));
 const neighbours = () => {
@@ -95,6 +98,25 @@ function whenThumb(inst, fn) {
   pumpThumbs();
 }
 
+function renderThumb(inst) {
+  if (!thumbs.has(inst.id)) {
+    try {
+      thumbnailer ||= new Thumbnailer(240);
+      const url = thumbnailer.render(inst);
+      thumbs.set(inst.id, url);
+      store.set(`${THUMB_VERSION}-${inst.id}`, url);
+    } catch (err) {
+      console.warn('Thumbnail failed for', inst.id, err);
+    }
+  }
+  (thumbListeners.get(inst.id) || []).forEach((fn) => thumbs.has(inst.id) && fn(thumbs.get(inst.id)));
+  thumbListeners.delete(inst.id);
+  return thumbs.get(inst.id) || null;
+}
+
+/** The picture of an instrument right now, rendering it on the spot if it isn't ready yet. */
+const thumbFor = (inst) => renderThumb(inst);
+
 function pumpThumbs() {
   if (thumbRunning) return;
   thumbRunning = true;
@@ -103,18 +125,7 @@ function pumpThumbs() {
     if (busy) { setTimeout(step, 300); return; } // never stall an animation
     const inst = thumbQueue.shift();
     if (!inst) { thumbRunning = false; return; }
-    if (!thumbs.has(inst.id)) {
-      try {
-        thumbnailer ||= new Thumbnailer(240);
-        const url = thumbnailer.render(inst);
-        thumbs.set(inst.id, url);
-        store.set(`${THUMB_VERSION}-${inst.id}`, url);
-      } catch (err) {
-        console.warn('Thumbnail failed for', inst.id, err);
-      }
-    }
-    (thumbListeners.get(inst.id) || []).forEach((fn) => thumbs.has(inst.id) && fn(thumbs.get(inst.id)));
-    thumbListeners.delete(inst.id);
+    renderThumb(inst);
     idle(step, { timeout: 500 });
   };
   idle(step, { timeout: 500 });
@@ -148,8 +159,9 @@ function moveInk() {
   const tab = tabsEl.querySelector(`.tab[data-id="${filter}"]`);
   tabsEl.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', t === tab));
   if (!tab) return;
-  ink.style.left = `${tab.offsetLeft + 14}px`;
-  ink.style.width = `${tab.offsetWidth - 28}px`;
+  const pad = Math.max(0, parseFloat(getComputedStyle(tab).paddingLeft) - 4);
+  ink.style.left = `${tab.offsetLeft + pad}px`;
+  ink.style.width = `${tab.offsetWidth - 2 * pad}px`;
 }
 
 function setFilter(id) {
@@ -162,18 +174,21 @@ function setFilter(id) {
 }
 
 // ===========================================================================
-// Carousel navigation with slide & fade
+// Carousel navigation
 // ===========================================================================
 async function navigate(inst, partId = null, dir = null) {
   if (!inst) return;
   if (busy) { pending = [inst, partId, dir]; return; }
   if (inst === current) { selectPart(partId); return; }
-  if (!current) { applyInstrument(inst, partId); return; }
+  if (!current || reduceMotion.matches) { applyInstrument(inst, partId); return; }
 
+  const n = neighbours();
   if (dir === null) {
-    const n = neighbours();
     dir = inst === n.next ? 1 : inst === n.prev ? -1 : Math.sign(n.list.indexOf(inst) - n.i) || 1;
   }
+  const side = dir > 0 ? n.next : n.prev;
+  if (inst === side && peekNext.offsetParent) { await turnTo(inst, partId, dir); return; }
+
   busy = true;
   tooltip.hidden = true;
 
@@ -206,6 +221,10 @@ async function navigate(inst, partId = null, dir = null) {
   plaque.classList.remove('leaving');
   setTimeout(() => ghost.remove(), 1000);
   await wait(650);
+  finishNavigation();
+}
+
+function finishNavigation() {
   busy = false;
   if (pending) {
     const p = pending;
@@ -214,29 +233,175 @@ async function navigate(inst, partId = null, dir = null) {
   }
 }
 
+// --- Grow / shrink swap: the clicked preview grows into the spotlight while the
+//     current instrument shrinks into the opposite preview slot. ---
+const TURN_MS = 800;
+const TURN_EASE = 'cubic-bezier(0.65, 0, 0.35, 1)';
+
+/** A box in stage coordinates. */
+function stageBox(node) {
+  const s = stageEl.getBoundingClientRect();
+  const r = node.getBoundingClientRect();
+  return { x: r.left - s.left, y: r.top - s.top, w: r.width, h: r.height };
+}
+const squareIn = (b) => {
+  const s = Math.min(b.w, b.h);
+  return { x: b.x + (b.w - s) / 2, y: b.y + (b.h - s) / 2, w: s, h: s };
+};
+/** Where a thumbnail-sized picture of the instrument sits when the live model is in the spotlight. */
+function spotlightBox() {
+  const w = viewerEl.clientWidth - insets.left - insets.right;
+  const h = viewerEl.clientHeight - insets.top - insets.bottom;
+  const s = Math.min(w, h) / 1.09; // thumbnails frame the model ~9% tighter than the stage does
+  return { x: insets.left + (w - s) / 2, y: insets.top + (h - s) / 2, w: s, h: s };
+}
+const centreOf = (b) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
+/** Anchor point for a preview's caption (its label, or the card's foot when labels are hidden). */
+function captionPoint(peek) {
+  const label = stageBox(peek.querySelector('.peek-label'));
+  if (label.w) return centreOf(label);
+  const f = stageBox(peek.querySelector('.peek-frame'));
+  return { x: f.x + f.w / 2, y: f.y + f.h };
+}
+function makeCaption(inst, at) {
+  const cap = el('div', 'turn-cap');
+  const sec = el('p', 'plaque-section', sectionName(inst.section));
+  sec.style.color = `var(--c-${inst.section})`;
+  cap.append(sec, el('h2', 'plaque-name', inst.name));
+  cap.style.left = `${at.x}px`;
+  cap.style.top = `${at.y}px`;
+  stageEl.append(cap);
+  return cap;
+}
+const capFrame = (dx, dy, s) => `translate(${dx}px, ${dy}px) translate(-50%, -50%) scale(${s})`;
+
+async function turnTo(inst, partId, dir) {
+  busy = true;
+  tooltip.hidden = true;
+  const from = dir > 0 ? peekNext : peekPrev; // the preview that grows into the spotlight
+  const to = dir > 0 ? peekPrev : peekNext; //   the slot the current instrument shrinks into
+  thumbFor(current); // the outgoing instrument becomes a preview; have its picture ready
+
+  // Measure everything before the stage changes.
+  const W = viewerEl.clientWidth;
+  const H = viewerEl.clientHeight;
+  const centre = spotlightBox();
+  const fromSq = squareIn(stageBox(from.querySelector('img')));
+  const toSq = squareIn(stageBox(to.querySelector('img')));
+  const plaqueAt = centreOf(stageBox(plaque));
+  const fromCap = captionPoint(from);
+  const toCap = captionPoint(to);
+  const opts = { duration: TURN_MS, easing: TURN_EASE, fill: 'forwards' };
+
+  // Outgoing: a still of the current view, which will shrink into the opposite preview slot.
+  const leaving = current;
+  const out = viewer.snapshot();
+  out.className = 'turn-ghost';
+  out.style.width = `${W}px`;
+  out.style.height = `${H}px`;
+  viewerEl.after(out);
+  const capOut = makeCaption(leaving, plaqueAt);
+  const capIn = makeCaption(inst, plaqueAt);
+  capIn.style.opacity = '0';
+
+  // Incoming: the live 3D stage itself, starting shrunk into the clicked preview's slot.
+  // The model was prebuilt in the background, so swapping it in here is near-instant.
+  const s0 = fromSq.w / centre.w;
+  const startAt = `translate(${fromSq.x - centre.x * s0}px, ${fromSq.y - centre.y * s0}px) scale(${s0})`;
+  viewerEl.classList.add('no-anim');
+  viewerEl.style.transformOrigin = '0 0';
+  viewerEl.style.transform = startAt;
+  viewerEl.style.opacity = '0.6';
+  app.classList.add('turning');
+  notesInner.classList.add('leaving');
+  applyInstrument(inst, partId, { glide: false, notes: false });
+  await frame();
+  await frame(); // let the newcomer draw once before anything starts moving
+
+  // Everything moves together from here.
+  const s = toSq.w / centre.w;
+  const outAnim = out.animate([
+    { transform: 'translate(0px, 0px) scale(1)', opacity: 1 },
+    { transform: `translate(${toSq.x - centre.x * s}px, ${toSq.y - centre.y * s}px) scale(${s})`, opacity: 0.55 },
+  ], opts);
+  const inAnim = viewerEl.animate([
+    { transform: startAt, opacity: 0.6 },
+    { transform: 'translate(0px, 0px) scale(1)', opacity: 1 },
+  ], opts);
+  setTimeout(() => { showNotes(); notesInner.classList.remove('leaving'); }, 340);
+
+  // Captions travel with their instruments.
+  capIn.style.opacity = '';
+  const capOutAnim = capOut.animate([
+    { transform: capFrame(0, 0, 1), opacity: 1 },
+    { transform: capFrame(toCap.x - plaqueAt.x, toCap.y - plaqueAt.y, 0.42), opacity: 0 },
+  ], { ...opts, duration: TURN_MS * 0.8 });
+  const capInAnim = capIn.animate([
+    { transform: capFrame(fromCap.x - plaqueAt.x, fromCap.y - plaqueAt.y, 0.42), opacity: 0 },
+    { transform: capFrame(0, 0, 1), opacity: 1 },
+  ], opts);
+
+  await Promise.all([outAnim, inAnim, capOutAnim, capInAnim].map((a) => a.finished));
+
+  // Hand over to the resting state: same pixels, so nothing visibly changes.
+  viewerEl.style.transform = '';
+  viewerEl.style.opacity = '';
+  viewerEl.style.transformOrigin = '';
+  inAnim.cancel();
+  capOut.remove();
+  capIn.remove();
+  app.classList.remove('turning'); // previews (refilled) fade back in; the plaque takes over from the caption
+  out.animate([{ opacity: 0.55 }, { opacity: 0 }], { duration: 450, easing: 'ease-out', fill: 'forwards' })
+    .finished.then(() => out.remove());
+  await frame();
+  viewerEl.classList.remove('no-anim');
+  finishNavigation();
+}
+
+/** Build the instruments either side in idle time so the next switch has nothing to wait for. */
+function prepareNeighbours() {
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200));
+  const n = neighbours();
+  const prep = (inst) => idle(() => {
+    if (busy) { setTimeout(() => prep(inst), 500); return; }
+    if (lineup().includes(inst)) viewer.prepare(inst);
+  }, { timeout: 2500 });
+  prep(n.next);
+  prep(n.prev);
+}
+
 function step(delta) {
   const n = neighbours();
   navigate(delta > 0 ? n.next : n.prev, null, delta);
 }
 
-function applyInstrument(inst, partId) {
+function applyInstrument(inst, partId, { glide = true, notes = true } = {}) {
   current = inst;
   selected = null;
   app.dataset.section = inst.section;
-  viewer.load(inst);
-  renderNotes();
+  viewer.load(inst, { glide });
+  if (notes) showNotes();
   updateStageLabels(false);
-  $('#notes-scroll').scrollTop = 0;
   document.title = `${inst.name} · Instrument Zoo`;
   const pid = partId && inst.parts.some((p) => p.id === partId) ? partId : null;
   selectPart(pid, !!pid);
+}
+
+function showNotes() {
+  renderNotes();
+  // re-mark the open part, since the list was rebuilt
+  partsList.querySelectorAll('.part').forEach((li) => {
+    const on = li.dataset.id === selected;
+    li.classList.toggle('open', on);
+    li.querySelector('.part-head').setAttribute('aria-expanded', on);
+  });
+  $('#notes-scroll').scrollTop = 0;
 }
 
 function updateStageLabels(animate) {
   const n = neighbours();
   $('#plaque-section').textContent = sectionName(current.section);
   $('#plaque-name').textContent = current.name;
-  $('#plaque-count').textContent = `No. ${roman(n.i + 1)} of ${roman(n.list.length)}`;
   const fill = (peek, inst) => {
     peek.querySelector('.peek-name').textContent = inst.name;
     peek.setAttribute('aria-label', `${peek === peekPrev ? 'Previous' : 'Next'}: ${inst.name}`);
@@ -258,7 +423,9 @@ function updateStageLabels(animate) {
   } else {
     swap();
   }
-  // warm up the thumbnails one step further out
+  prepareNeighbours();
+  // warm up the pictures that the next transition will move: this one, and one step further out
+  whenThumb(current, () => {});
   whenThumb(n.list[(n.i + 2) % n.list.length], () => {});
   whenThumb(n.list[(n.i - 2 + n.list.length) % n.list.length], () => {});
 }
@@ -412,7 +579,8 @@ function updateInsets() {
   const phone = window.innerWidth <= 820;
   const mast = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mast-h')) || 78;
   const side = phone ? 60 : Math.min(170, W * 0.16);
-  viewer.setInsets({ left: side, right: side, top: phone ? mast : mast + 10, bottom: phone ? 90 : 120 });
+  insets = { left: side, right: side, top: phone ? mast : mast + 10, bottom: phone ? 90 : 120 };
+  viewer.setInsets(insets);
   moveInk();
 }
 window.addEventListener('resize', updateInsets);

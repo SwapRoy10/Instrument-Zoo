@@ -143,6 +143,12 @@ export class Viewer {
     this.controls.screenSpacePanning = true;
     this.controls.autoRotateSpeed = 0.7;
     this.controls.addEventListener('start', () => { this.flight = null; });
+    // OrbitControls zooms in hard steps per wheel notch; take the wheel over and ease the zoom instead.
+    // (Pinch-zoom on touch screens still goes through OrbitControls.)
+    this.zoomTo = null;
+    this.lastTick = performance.now();
+    container.addEventListener('wheel', (e) => this.#onWheel(e), { passive: false, capture: true });
+    this.cache = new Map(); // def.id -> prebuilt model, ready to swap in instantly
 
     this.highlight = new THREE.Color(0xff9a3c);
     this.insets = { left: 0, right: 0, top: 0, bottom: 0 };
@@ -184,20 +190,20 @@ export class Viewer {
     this.#resize();
   }
 
-  load(def) {
-    if (this.root) {
-      this.scene.remove(this.root);
-      disposeTree(this.root);
-    }
-    this.def = def;
-    this.selected = null;
-    this.hovered = null;
-    this.parts.clear();
-    this.pickables = [];
+  /** Build an instrument and compile its shaders in the background so a later load() is instant. */
+  prepare(def) {
+    if (this.def === def || this.cache.has(def.id)) return;
+    const entry = this.#build(def);
+    this.#stash(entry);
+    this.renderer.compileAsync?.(entry.root, this.camera, this.scene).catch(() => {});
+  }
 
+  #build(def) {
     const model = def.build();
-    this.root = new THREE.Group();
-    this.root.add(model);
+    const root = new THREE.Group();
+    root.add(model);
+    const parts = new Map();
+    const pickables = [];
 
     // Give every (material, part) pair its own material so highlighting one part never bleeds into another.
     const cache = new Map();
@@ -218,12 +224,40 @@ export class Viewer {
         cache.set(key, m);
       }
       o.material = cache.get(key);
-      if (!this.parts.has(id)) this.parts.set(id, { meshes: [], materials: new Set() });
-      const entry = this.parts.get(id);
+      if (!parts.has(id)) parts.set(id, { meshes: [], materials: new Set() });
+      const entry = parts.get(id);
       entry.meshes.push(o);
       entry.materials.add(o.material);
-      this.pickables.push(o);
+      pickables.push(o);
     });
+    return { def, root, parts, pickables };
+  }
+
+  /** Keep a few built models around (neighbours, and the one just left); dispose the oldest. */
+  #stash(entry) {
+    this.cache.delete(entry.def.id);
+    this.cache.set(entry.def.id, entry);
+    while (this.cache.size > 4) {
+      const [id, old] = this.cache.entries().next().value;
+      this.cache.delete(id);
+      disposeTree(old.root);
+    }
+  }
+
+  load(def, { glide = true } = {}) {
+    const entry = this.cache.get(def.id) || this.#build(def);
+    this.cache.delete(def.id);
+    if (this.root) {
+      this.scene.remove(this.root);
+      this.#stash({ def: this.def, root: this.root, parts: this.parts, pickables: this.pickables });
+    }
+    this.def = def;
+    this.selected = null;
+    this.hovered = null;
+    this.zoomTo = null;
+    this.root = entry.root;
+    this.parts = entry.parts;
+    this.pickables = entry.pickables;
 
     const { bounds, sphere } = this.studio.frame(this.root);
     this.scene.add(this.root);
@@ -237,9 +271,13 @@ export class Viewer {
     this.camera.updateProjectionMatrix();
 
     this.#applyMaterials();
-    // Start a little further out and glide in.
-    this.overview(false, 1.35);
-    this.overview(true);
+    // Start a little further out and glide in (or appear exactly framed, to match a picture).
+    if (glide) {
+      this.overview(false, 1.35);
+      this.overview(true);
+    } else {
+      this.overview(false);
+    }
     return [...this.parts.keys()];
   }
 
@@ -289,7 +327,31 @@ export class Viewer {
     return fitDistance(this.camera, radius, Math.max(0.25, (w - left - right) / w), Math.max(0.25, (h - top - bottom) / h));
   }
 
+  #onWheel(e) {
+    e.preventDefault();
+    e.stopPropagation(); // keep OrbitControls' stepped zoom from also firing
+    if (!this.sphere) return;
+    // Normalise lines/pages to pixels; trackpad pinches arrive as small ctrl+wheel deltas.
+    let dy = e.deltaY * (e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? 600 : 1);
+    dy = THREE.MathUtils.clamp(dy, -240, 240) * (e.ctrlKey ? 8 : 1);
+    this.flight = null;
+    const from = this.zoomTo ?? this.camera.position.distanceTo(this.controls.target);
+    this.zoomTo = THREE.MathUtils.clamp(from * Math.exp(dy * 0.0011), this.controls.minDistance, this.controls.maxDistance);
+  }
+
+  /** Ease the camera distance toward the wheel's target, frame-rate independent. */
+  #stepZoom(dt) {
+    if (this.zoomTo == null) return;
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    const d = offset.length();
+    const k = 1 - Math.exp(-dt * 11);
+    const next = Math.exp(THREE.MathUtils.lerp(Math.log(d), Math.log(this.zoomTo), k));
+    this.camera.position.copy(this.controls.target).addScaledVector(offset.normalize(), next);
+    if (Math.abs(Math.log(next / this.zoomTo)) < 0.0005) this.zoomTo = null;
+  }
+
   #flyTo(target, dir, dist, animate) {
+    this.zoomTo = null;
     const endPos = target.clone().addScaledVector(dir, dist);
     if (!animate) {
       this.flight = null;
@@ -352,7 +414,11 @@ export class Viewer {
   }
 
   #tick() {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - this.lastTick) / 1000);
+    this.lastTick = now;
     this.#stepFlight();
+    this.#stepZoom(dt);
     this.controls.update();
     if (this.selected) {
       const entry = this.parts.get(this.selected);
