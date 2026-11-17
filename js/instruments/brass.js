@@ -66,7 +66,7 @@ export const trombone = {
 
 export const bassTrombone = {
   id: 'basstrombone', name: 'Bass Trombone', section: 'brass', ensembles: BOTH,
-  range: 'B♭0 (pedal) – B♭4', size: '2.7 m of tubing + valve loops',
+  range: 'B♭0 – B♭4 (lowest notes are pedals)', size: '2.7 m of tubing + valve loops',
   blurb: 'A trombone with a wider bore, a bigger bell and two rotary valves that unlock the deep bottom range. It anchors the trombone section and adds weight under the tuba.',
   defaultView: [0.25, 0.35, 1],
   parts: tromboneParts(true),

@@ -19,7 +19,7 @@ export const SECTIONS = [
 ];
 
 export const ENSEMBLES = {
-  all: 'All',
+  all: 'All Instruments',
   orchestra: 'Orchestra',
   wind: 'Wind Ensemble',
 };

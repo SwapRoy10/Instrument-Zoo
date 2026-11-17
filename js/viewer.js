@@ -6,7 +6,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { applyTriplanar } from './lib/materials.js';
 
-const FLIGHT_MS = 1000;
+const FLIGHT_MS = 1150;
 const HDRI_BASE = 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r170/examples/textures/equirectangular/';
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
@@ -160,6 +160,17 @@ export class Viewer {
     new ResizeObserver(() => this.#resize()).observe(container);
     this.#resize();
     this.renderer.setAnimationLoop(() => this.#tick());
+  }
+
+  /** A 2D canvas holding a copy of the current frame, used for slide/fade transitions. */
+  snapshot() {
+    const src = this.renderer.domElement;
+    this.renderer.render(this.scene, this.camera);
+    const c = document.createElement('canvas');
+    c.width = src.width;
+    c.height = src.height;
+    c.getContext('2d').drawImage(src, 0, 0);
+    return c;
   }
 
   setAccent(color) {

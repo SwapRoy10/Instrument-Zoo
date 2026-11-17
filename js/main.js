@@ -1,6 +1,9 @@
 import { Viewer, Thumbnailer } from './viewer.js';
 import { instruments, SECTIONS, ENSEMBLES } from './instruments/index.js';
 
+// ===========================================================================
+// Utilities
+// ===========================================================================
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -12,202 +15,271 @@ const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage full or blocked */ } },
 };
-const THUMB_VERSION = 'iz-thumb-v3';
+const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const roman = (n) => {
+  const map = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
+  let out = '';
+  for (const [v, s] of map) while (n >= v) { out += s; n -= v; }
+  return out;
+};
+const sectionName = (id) => SECTIONS.find((s) => s.id === id)?.name ?? id;
+const THUMB_VERSION = 'iz-thumb-v4';
+const SLIDE = 24; // % of the stage width an instrument travels during a transition
 
+// ===========================================================================
+// State & elements
+// ===========================================================================
 const app = $('#app');
-const list = $('#browser-list');
+const viewerEl = $('#viewer');
+const notesInner = $('#notes-inner');
+const plaque = $('#plaque');
 const partsList = $('#parts');
 const tooltip = $('#tooltip');
 const pin = $('#pin-label');
 const isolateBtn = $('#btn-isolate');
 const rotateBtn = $('#btn-rotate');
-const search = $('#search');
-const hint = $('#hint');
+const peekPrev = $('#peek-prev');
+const peekNext = $('#peek-next');
 
+let filter = store.get('iz-filter') || 'all';
+if (!ENSEMBLES[filter]) filter = 'all';
 let current = null;
 let selected = null;
-let ensemble = store.get('iz-ensemble') || 'all';
-if (!ENSEMBLES[ensemble]) ensemble = 'all';
-let query = '';
+let busy = false;
+let pending = null;
 
-const env = new URLSearchParams(location.search).get('env') || 'room';
-const viewer = new Viewer($('#viewer'), {
-  env,
+const lineup = () => (filter === 'all' ? instruments : instruments.filter((i) => i.ensembles.includes(filter)));
+const neighbours = () => {
+  const l = lineup();
+  const i = Math.max(0, l.indexOf(current));
+  return { list: l, i, prev: l[(i - 1 + l.length) % l.length], next: l[(i + 1) % l.length] };
+};
+
+const viewer = new Viewer(viewerEl, {
   onPick: (id) => { if (id) selectPart(id === selected ? null : id); },
   onHover: (id, x, y) => {
-    if (!id) { tooltip.hidden = true; return; }
+    if (!id || busy) { tooltip.hidden = true; return; }
     const part = current.parts.find((p) => p.id === id);
     tooltip.textContent = part ? part.name : id;
     tooltip.hidden = false;
-    tooltip.style.transform = `translate(${x + 14}px, ${y + 14}px)`;
+    tooltip.style.transform = `translate(${x + 16}px, ${y + 16}px)`;
   },
 });
+viewer.setAccent('#c9973f'); // gilded highlight for selected parts
 viewer.onFrame = () => {
-  if (!selected) { pin.hidden = true; return; }
+  if (!selected || busy) { pin.hidden = true; return; }
   const p = viewer.projectPart(selected);
   if (!p) { pin.hidden = true; return; }
   pin.hidden = false;
   pin.style.transform = `translate(${p.x}px, ${p.y}px)`;
 };
 
-const sectionColor = (id) => getComputedStyle(document.documentElement).getPropertyValue(`--c-${id}`).trim() || '#ff7a45';
-const sectionName = (id) => SECTIONS.find((s) => s.id === id)?.name ?? id;
-
 // ===========================================================================
-// Browser
+// Thumbnails (rendered lazily off-screen, cached in the browser)
 // ===========================================================================
-const cards = new Map(); // id -> card element
+const thumbs = new Map();
+instruments.forEach((i) => { const t = store.get(`${THUMB_VERSION}-${i.id}`); if (t) thumbs.set(i.id, t); });
+const thumbQueue = [];
+const thumbListeners = new Map(); // id -> [fn]
+let thumbnailer = null;
+let thumbRunning = false;
 
-function buildEnsembleFilter() {
-  const seg = $('#ensemble-filter');
-  Object.entries(ENSEMBLES).forEach(([id, label]) => {
-    const b = el('button', null, label);
-    b.type = 'button';
-    b.setAttribute('role', 'radio');
-    b.dataset.id = id;
-    b.addEventListener('click', () => {
-      ensemble = id;
-      store.set('iz-ensemble', id);
-      renderBrowser();
-    });
-    seg.append(b);
-  });
+function whenThumb(inst, fn) {
+  if (thumbs.has(inst.id)) { fn(thumbs.get(inst.id)); return; }
+  if (!thumbListeners.has(inst.id)) thumbListeners.set(inst.id, []);
+  thumbListeners.get(inst.id).push(fn);
+  const at = thumbQueue.indexOf(inst);
+  if (at >= 0) thumbQueue.splice(at, 1);
+  thumbQueue.unshift(inst); // most recently requested first
+  pumpThumbs();
 }
 
-function visibleInstruments() {
-  const q = query.trim().toLowerCase();
-  return instruments.filter((inst) => {
-    if (ensemble !== 'all' && !inst.ensembles.includes(ensemble)) return false;
-    if (!q) return true;
-    return inst.name.toLowerCase().includes(q) || sectionName(inst.section).toLowerCase().includes(q);
-  });
+function pumpThumbs() {
+  if (thumbRunning) return;
+  thumbRunning = true;
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 80));
+  const step = () => {
+    if (busy) { setTimeout(step, 300); return; } // never stall an animation
+    const inst = thumbQueue.shift();
+    if (!inst) { thumbRunning = false; return; }
+    if (!thumbs.has(inst.id)) {
+      try {
+        thumbnailer ||= new Thumbnailer(240);
+        const url = thumbnailer.render(inst);
+        thumbs.set(inst.id, url);
+        store.set(`${THUMB_VERSION}-${inst.id}`, url);
+      } catch (err) {
+        console.warn('Thumbnail failed for', inst.id, err);
+      }
+    }
+    (thumbListeners.get(inst.id) || []).forEach((fn) => thumbs.has(inst.id) && fn(thumbs.get(inst.id)));
+    thumbListeners.delete(inst.id);
+    idle(step, { timeout: 500 });
+  };
+  idle(step, { timeout: 500 });
 }
 
-function makeCard(inst) {
-  const b = el('button', 'card');
-  b.type = 'button';
-  b.dataset.id = inst.id;
-  b.dataset.section = inst.section;
-  const thumb = el('span', 'thumb');
-  const img = el('img');
-  img.alt = '';
-  img.decoding = 'async';
-  thumb.append(img);
-  b.append(thumb, el('span', 'card-name', inst.name), el('span', 'card-meta', inst.range.split(' (')[0]));
-  b.addEventListener('click', () => {
-    go(inst.id);
-    closeDrawer();
-  });
-  const cached = store.get(`${THUMB_VERSION}-${inst.id}`);
-  if (cached) setThumb(b, cached);
-  return b;
-}
-
-function setThumb(card, url) {
-  const img = card.querySelector('img');
-  img.onload = () => { img.classList.add('ready'); card.querySelector('.thumb').classList.add('loaded'); };
+function setImg(img, url) {
+  if (img.dataset.src === url) return;
+  img.classList.remove('ready');
+  img.dataset.src = url;
+  img.onload = () => img.classList.add('ready');
   img.src = url;
 }
 
-function renderBrowser() {
-  $('#ensemble-filter').querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', b.dataset.id === ensemble));
-  const vis = visibleInstruments();
-  list.replaceChildren();
-  SECTIONS.forEach((sec) => {
-    const items = vis.filter((i) => i.section === sec.id);
-    if (!items.length) return;
-    const wrap = el('section', 'sec');
-    wrap.dataset.section = sec.id;
-    const head = el('h3', 'sec-head');
-    head.append(el('span', 'dot'), el('span', null, sec.name), el('span', 'n', String(items.length)));
-    const grid = el('div', 'cards');
-    items.forEach((inst) => {
-      if (!cards.has(inst.id)) cards.set(inst.id, makeCard(inst));
-      const card = cards.get(inst.id);
-      card.classList.toggle('active', inst === current);
-      grid.append(card);
-    });
-    wrap.append(head, grid);
-    list.append(wrap);
-  });
-  if (!vis.length) list.append(el('p', 'empty', 'No instruments match that search.'));
-  updateNavButtons();
+// ===========================================================================
+// Ensemble tabs
+// ===========================================================================
+const tabsEl = $('#tabs');
+const ink = $('#tab-ink');
+Object.entries(ENSEMBLES).forEach(([id, label]) => {
+  const b = el('button', 'tab', label);
+  b.type = 'button';
+  b.dataset.id = id;
+  b.setAttribute('role', 'tab');
+  const count = id === 'all' ? instruments.length : instruments.filter((i) => i.ensembles.includes(id)).length;
+  b.append(el('span', 'n', String(count)));
+  b.addEventListener('click', () => setFilter(id));
+  tabsEl.append(b);
+});
+
+function moveInk() {
+  const tab = tabsEl.querySelector(`.tab[data-id="${filter}"]`);
+  tabsEl.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', t === tab));
+  if (!tab) return;
+  ink.style.left = `${tab.offsetLeft + 14}px`;
+  ink.style.width = `${tab.offsetWidth - 28}px`;
 }
 
-// ----- Lazy thumbnails, rendered one by one when the browser is idle -----
-let thumbnailer = null;
-function queueThumbnails() {
-  const todo = instruments.filter((i) => !store.get(`${THUMB_VERSION}-${i.id}`) && !cards.get(i.id)?.querySelector('img.ready'));
-  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 60));
-  const step = () => {
-    const inst = todo.shift();
-    if (!inst) { thumbnailer?.renderer.dispose(); thumbnailer = null; return; }
-    try {
-      thumbnailer ||= new Thumbnailer(220);
-      const url = thumbnailer.render(inst);
-      store.set(`${THUMB_VERSION}-${inst.id}`, url);
-      if (cards.has(inst.id)) setThumb(cards.get(inst.id), url);
-    } catch (err) {
-      console.warn('Thumbnail failed for', inst.id, err);
-    }
-    idle(step, { timeout: 400 });
-  };
-  idle(step, { timeout: 800 });
+function setFilter(id) {
+  if (id === filter) return;
+  filter = id;
+  store.set('iz-filter', id);
+  moveInk();
+  if (!lineup().includes(current)) navigate(lineup()[0], null, 0);
+  else updateStageLabels(true);
 }
 
 // ===========================================================================
-// Instrument & parts
+// Carousel navigation with slide & fade
 // ===========================================================================
-function go(id, partId = null) {
-  const hash = `#/${id}${partId ? `/${partId}` : ''}`;
-  if (location.hash === hash) fromHash();
-  else location.hash = hash;
-}
+async function navigate(inst, partId = null, dir = null) {
+  if (!inst) return;
+  if (busy) { pending = [inst, partId, dir]; return; }
+  if (inst === current) { selectPart(partId); return; }
+  if (!current) { applyInstrument(inst, partId); return; }
 
-function loadInstrument(id, partId = null) {
-  const inst = instruments.find((i) => i.id === id) || instruments[0];
-  const changed = current !== inst;
-  if (changed) {
-    current = inst;
-    selected = null;
-    app.dataset.section = inst.section;
-    viewer.setAccent(sectionColor(inst.section));
-    viewer.load(inst);
-    renderPanel();
-    cards.forEach((c, cid) => c.classList.toggle('active', cid === inst.id));
-    cards.get(inst.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    updateNavButtons();
-    $('#panel .panel-scroll').scrollTop = 0;
+  if (dir === null) {
+    const n = neighbours();
+    dir = inst === n.next ? 1 : inst === n.prev ? -1 : Math.sign(n.list.indexOf(inst) - n.i) || 1;
   }
-  const pid = partId && inst.parts.some((p) => p.id === partId) ? partId : null;
-  selectPart(pid, !!pid || !changed);
+  busy = true;
+  tooltip.hidden = true;
+
+  // 1. Freeze the outgoing instrument into a ghost image and send it off-stage.
+  const ghost = viewer.snapshot();
+  ghost.className = 'ghost';
+  viewerEl.after(ghost);
+  viewerEl.classList.add('no-anim');
+  viewerEl.style.opacity = '0';
+  viewerEl.style.transform = `translateX(${dir * SLIDE}%) scale(0.9)`;
+  notesInner.classList.add('leaving');
+  plaque.classList.add('leaving');
+  peekPrev.classList.add('swapping');
+  peekNext.classList.add('swapping');
+  await frame();
+  ghost.style.opacity = '0';
+  ghost.style.transform = `translateX(${-dir * SLIDE}%) scale(0.9)`;
+
+  // 2. While it leaves, build the new instrument behind the scenes.
+  await wait(230);
+  applyInstrument(inst, partId);
+  await frame();
+  await frame();
+
+  // 3. Glide the newcomer into the spotlight.
+  viewerEl.classList.remove('no-anim');
+  viewerEl.style.opacity = '';
+  viewerEl.style.transform = '';
+  notesInner.classList.remove('leaving');
+  plaque.classList.remove('leaving');
+  setTimeout(() => ghost.remove(), 1000);
+  await wait(650);
+  busy = false;
+  if (pending) {
+    const p = pending;
+    pending = null;
+    navigate(...p);
+  }
 }
 
-function renderPanel() {
+function step(delta) {
+  const n = neighbours();
+  navigate(delta > 0 ? n.next : n.prev, null, delta);
+}
+
+function applyInstrument(inst, partId) {
+  current = inst;
+  selected = null;
+  app.dataset.section = inst.section;
+  viewer.load(inst);
+  renderNotes();
+  updateStageLabels(false);
+  $('#notes-scroll').scrollTop = 0;
+  document.title = `${inst.name} · Instrument Zoo`;
+  const pid = partId && inst.parts.some((p) => p.id === partId) ? partId : null;
+  selectPart(pid, !!pid);
+}
+
+function updateStageLabels(animate) {
+  const n = neighbours();
+  $('#plaque-section').textContent = sectionName(current.section);
+  $('#plaque-name').textContent = current.name;
+  $('#plaque-count').textContent = `No. ${roman(n.i + 1)} of ${roman(n.list.length)}`;
+  const fill = (peek, inst) => {
+    peek.querySelector('.peek-name').textContent = inst.name;
+    peek.setAttribute('aria-label', `${peek === peekPrev ? 'Previous' : 'Next'}: ${inst.name}`);
+    const img = peek.querySelector('img');
+    peek.dataset.id = inst.id;
+    if (!thumbs.has(inst.id)) img.classList.remove('ready');
+    whenThumb(inst, (url) => { if (peek.dataset.id === inst.id) setImg(img, url); });
+  };
+  const swap = () => {
+    fill(peekPrev, n.prev);
+    fill(peekNext, n.next);
+    peekPrev.classList.remove('swapping');
+    peekNext.classList.remove('swapping');
+  };
+  if (animate) {
+    peekPrev.classList.add('swapping');
+    peekNext.classList.add('swapping');
+    setTimeout(swap, 380);
+  } else {
+    swap();
+  }
+  // warm up the thumbnails one step further out
+  whenThumb(n.list[(n.i + 2) % n.list.length], () => {});
+  whenThumb(n.list[(n.i - 2 + n.list.length) % n.list.length], () => {});
+}
+
+peekPrev.addEventListener('click', () => step(-1));
+peekNext.addEventListener('click', () => step(1));
+
+// ===========================================================================
+// Programme notes & anatomy
+// ===========================================================================
+function renderNotes() {
   const inst = current;
   $('#inst-section').textContent = sectionName(inst.section);
   $('#inst-name').textContent = inst.name;
+  $('#inst-ensembles').textContent = inst.ensembles.length
+    ? `Heard in the ${inst.ensembles.map((e) => ENSEMBLES[e]).join(' & ')}`
+    : 'A guest of the zoo, in neither ensemble';
   $('#inst-range').textContent = inst.range;
   $('#inst-size').textContent = inst.size;
   $('#inst-blurb').textContent = inst.blurb;
   $('#part-count').textContent = `${inst.parts.length} parts`;
-  document.title = `${inst.name} · Instrument Zoo`;
-
-  const badges = $('#inst-badges');
-  badges.replaceChildren();
-  const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c0-3 2.7-5 6-5s6 2 6 5M14 19c0-2.4 1.6-4 4-4s3 1.2 3 3"/></svg>';
-  if (!inst.ensembles.length) {
-    const b = el('span', 'badge');
-    b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.5 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>';
-    b.append('Guest exhibit');
-    badges.append(b);
-  }
-  inst.ensembles.forEach((e) => {
-    const b = el('span', 'badge');
-    b.innerHTML = icon;
-    b.append(ENSEMBLES[e]);
-    badges.append(b);
-  });
 
   partsList.replaceChildren();
   inst.parts.forEach((part, i) => {
@@ -216,17 +288,20 @@ function renderPanel() {
     const head = el('button', 'part-head');
     head.type = 'button';
     head.setAttribute('aria-expanded', 'false');
-    head.append(el('span', 'part-num', String(i + 1).padStart(2, '0')), el('span', 'part-name', part.name));
-    head.insertAdjacentHTML('beforeend', '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>');
+    head.append(el('span', 'part-num', roman(i + 1)), el('span', 'part-name', part.name), el('span', 'part-mark'));
     head.addEventListener('click', () => selectPart(selected === part.id ? null : part.id));
-    const body = el('div', 'part-body');
     const sec = (label, text, cls = '') => {
       const s = el('div', `part-sec ${cls}`);
-      s.append(el('h3', null, label), el('p', null, text));
+      s.append(el('h4', null, label), el('p', null, text));
       return s;
     };
-    body.append(sec('What it is', part.what), sec('Why it matters', part.why));
-    if (part.fact) body.append(sec('Did you know?', part.fact, 'fact'));
+    const inner = el('div', 'part-body-inner');
+    inner.append(sec('What it is', part.what), sec('Why it matters', part.why));
+    if (part.fact) inner.append(sec('Did you know?', part.fact, 'fact'));
+    const clip = el('div');
+    clip.append(inner);
+    const body = el('div', 'part-body');
+    body.append(clip);
     li.append(head, body);
     partsList.append(li);
   });
@@ -239,7 +314,7 @@ function selectPart(id, fly = true) {
     const on = li.dataset.id === id;
     li.classList.toggle('open', on);
     li.querySelector('.part-head').setAttribute('aria-expanded', on);
-    if (on) requestAnimationFrame(() => li.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+    if (on) setTimeout(() => li.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 320);
   });
   if (id) {
     pin.textContent = current.parts.find((p) => p.id === id).name;
@@ -258,61 +333,55 @@ function stepPart(delta) {
   selectPart(ids[(i + delta + ids.length) % ids.length]);
 }
 
-function navList() {
-  const vis = visibleInstruments();
-  return vis.includes(current) ? vis : instruments;
+// ===========================================================================
+// Catalogue overlay
+// ===========================================================================
+const catalogue = $('#catalogue');
+function openCatalogue() {
+  const grid = $('#catalogue-grid');
+  grid.replaceChildren();
+  const l = lineup();
+  let k = 0;
+  SECTIONS.forEach((sec) => {
+    const items = l.filter((i) => i.section === sec.id);
+    if (!items.length) return;
+    const col = el('section', 'cat-sec');
+    col.dataset.section = sec.id;
+    const h = el('h3', null, sec.name);
+    h.style.color = `var(--c-${sec.id})`;
+    col.append(h);
+    items.forEach((inst) => {
+      const b = el('button', `cat-item${inst === current ? ' current' : ''}`);
+      b.type = 'button';
+      b.style.animationDelay = `${Math.min(k++ * 25, 500)}ms`;
+      const t = el('span', 'cat-thumb');
+      const img = el('img');
+      img.alt = '';
+      t.append(img);
+      whenThumb(inst, (url) => { img.src = url; });
+      const text = el('span');
+      text.append(el('span', 'cat-name', inst.name), el('span', 'cat-range', inst.range.split(' (')[0]));
+      b.append(t, text);
+      b.addEventListener('click', () => { closeCatalogue(); navigate(inst, null, null); });
+      col.append(b);
+    });
+    grid.append(col);
+  });
+  catalogue.hidden = false;
+  catalogue.classList.remove('closing');
+  $('#catalogue-btn').setAttribute('aria-expanded', 'true');
 }
-function stepInstrument(delta) {
-  const l = navList();
-  const i = l.indexOf(current);
-  go(l[(i + delta + l.length) % l.length].id);
+function closeCatalogue() {
+  if (catalogue.hidden) return;
+  catalogue.classList.add('closing');
+  $('#catalogue-btn').setAttribute('aria-expanded', 'false');
+  setTimeout(() => { catalogue.hidden = true; catalogue.classList.remove('closing'); }, 340);
 }
-function updateNavButtons() {
-  if (!current) return;
-  const l = navList();
-  const i = l.indexOf(current);
-  $('#prev-inst span').textContent = l[(i - 1 + l.length) % l.length].name;
-  $('#next-inst span').textContent = l[(i + 1) % l.length].name;
-}
+$('#catalogue-btn').addEventListener('click', () => (catalogue.hidden ? openCatalogue() : closeCatalogue()));
+$('#catalogue-close').addEventListener('click', closeCatalogue);
 
 // ===========================================================================
-// Layout: keep the model framed in the area not covered by panels
-// ===========================================================================
-function updateInsets() {
-  const W = window.innerWidth;
-  const H = window.innerHeight;
-  const panel = $('#panel').getBoundingClientRect();
-  const browser = $('#browser').getBoundingClientRect();
-  const phone = W <= 760;
-  const drawer = W <= 1180;
-  const insets = {
-    left: drawer ? 0 : browser.right,
-    right: phone ? 0 : W - panel.left,
-    top: phone ? 60 : 0,
-    bottom: phone ? H - panel.top : 0,
-  };
-  viewer.setInsets(insets);
-  app.style.setProperty('--il', `${insets.left}px`);
-  app.style.setProperty('--ir', `${insets.right}px`);
-  app.style.setProperty('--ib', `${insets.bottom}px`);
-}
-window.addEventListener('resize', updateInsets);
-
-function openDrawer() {
-  app.classList.add('browsing');
-  $('#scrim').hidden = false;
-  $('#browse-toggle').setAttribute('aria-expanded', 'true');
-}
-function closeDrawer() {
-  app.classList.remove('browsing');
-  $('#scrim').hidden = true;
-  $('#browse-toggle').setAttribute('aria-expanded', 'false');
-}
-$('#browse-toggle').addEventListener('click', () => (app.classList.contains('browsing') ? closeDrawer() : openDrawer()));
-$('#scrim').addEventListener('click', closeDrawer);
-
-// ===========================================================================
-// Controls
+// Toolbar, keyboard, layout
 // ===========================================================================
 $('#btn-reset').addEventListener('click', () => selectPart(null));
 isolateBtn.addEventListener('click', () => {
@@ -325,43 +394,51 @@ rotateBtn.addEventListener('click', () => {
   rotateBtn.setAttribute('aria-pressed', on);
   viewer.setAutoRotate(on);
 });
-$('#prev-inst').addEventListener('click', () => stepInstrument(-1));
-$('#next-inst').addEventListener('click', () => stepInstrument(1));
-search.addEventListener('input', () => { query = search.value; renderBrowser(); });
 
 window.addEventListener('keydown', (e) => {
-  if (e.target.closest('input, textarea')) {
-    if (e.key === 'Escape') search.blur();
-    return;
-  }
-  if (e.key === '/') { e.preventDefault(); if (window.innerWidth <= 1180) openDrawer(); search.focus(); }
-  else if (e.key === 'Escape') { if (app.classList.contains('browsing')) closeDrawer(); else selectPart(null); }
+  if (e.target.closest('input, textarea')) return;
+  if (e.key === 'Escape') { if (!catalogue.hidden) closeCatalogue(); else selectPart(null); }
+  else if (!catalogue.hidden) return;
+  else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
   else if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); stepPart(1); }
   else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); stepPart(-1); }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); stepInstrument(1); }
-  else if (e.key === 'ArrowLeft') { e.preventDefault(); stepInstrument(-1); }
   else if (e.key === 'i' && selected) isolateBtn.click();
+  else if (e.key === 'c') openCatalogue();
 });
 
-$('#viewer').addEventListener('pointerdown', () => hint.classList.add('gone'), { once: true });
-setTimeout(() => hint.classList.add('gone'), 9000);
+function updateInsets() {
+  const W = viewerEl.clientWidth;
+  const phone = window.innerWidth <= 820;
+  const mast = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mast-h')) || 78;
+  const side = phone ? 60 : Math.min(170, W * 0.16);
+  viewer.setInsets({ left: side, right: side, top: phone ? mast : mast + 10, bottom: phone ? 90 : 120 });
+  moveInk();
+}
+window.addEventListener('resize', updateInsets);
+document.fonts?.ready.then(moveInk);
+
+viewerEl.addEventListener('pointerdown', () => $('#hint').classList.add('gone'), { once: true });
+setTimeout(() => $('#hint').classList.add('gone'), 10000);
 
 // ===========================================================================
 // Deep links: #/instrument/part
 // ===========================================================================
 function fromHash() {
-  const [, inst, part] = location.hash.split('/');
-  loadInstrument(inst || instruments[0].id, part || null);
+  const [, id, part] = location.hash.split('/');
+  const inst = instruments.find((i) => i.id === id) || lineup()[0];
+  if (!lineup().includes(inst)) { filter = 'all'; moveInk(); }
+  navigate(inst, part || null);
 }
 window.addEventListener('hashchange', fromHash);
 
-buildEnsembleFilter();
-renderBrowser();
 updateInsets();
 fromHash();
 requestAnimationFrame(() => {
   const loading = $('#loading');
   loading.classList.add('done');
-  setTimeout(() => loading.remove(), 600);
-  queueThumbnails();
+  setTimeout(() => loading.remove(), 900);
+  // fill in the remaining thumbnails quietly for the catalogue
+  instruments.forEach((i) => { if (!thumbs.has(i.id)) thumbQueue.push(i); });
+  pumpThumbs();
 });
