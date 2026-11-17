@@ -1,0 +1,10 @@
+{
+  "name": "instrument-zoo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Explore musical instruments in 3D and learn their anatomy.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
