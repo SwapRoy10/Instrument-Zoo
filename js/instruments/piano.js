@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import {
-  mat, pmat, addPart, v3, v2, cylinderBetween, instancedCylinders, instancedBoxes, offsetPolygon, tube,
+  addPart, v3, v2, cylinderBetween, instancedCylinders, instancedBoxes, offsetPolygon, tube,
 } from '../lib/helpers.js';
+import {
+  wood, metal, plastic, stringMat, felt as feltMat, rubber as rubberMat, lacquer as lacquerMat,
+} from '../lib/materials.js';
 
 // Grand piano. Plan view uses (u, v): u = across the keyboard (bass at -u),
 // v = distance back from the keyboard toward the tail. World: x = u, z = -v, y up.
@@ -53,8 +56,9 @@ function planMesh(geometry, material, y) {
 export default {
   id: 'piano',
   name: 'Grand Piano',
-  emoji: '🎹',
-  family: 'Keyboard · Struck strings',
+  section: 'keyboards',
+  ensembles: ['orchestra', 'wind'],
+  range: 'A0 – C8', size: '1.8 m long (5′ 10″ grand)',
   blurb:
     'A grand piano is a giant harp lying on its side inside a wooden case. Pressing a key flings a felt hammer up at the strings. It is technically a percussion instrument as much as a string instrument, with around 12,000 parts.',
   defaultView: [0.35, 0.75, 1],
@@ -154,21 +158,21 @@ export default {
   build() {
     const g = new THREE.Group();
 
-    const lacquer = pmat(0x0b0b0d, { roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.05 });
-    const spruce = mat(0xdcb57c, { roughness: 0.6 });
-    const bridgeWood = mat(0xa9744a, { roughness: 0.5 });
-    const gold = pmat(0xc9a244, { metalness: 0.85, roughness: 0.35, clearcoat: 0.4 });
-    const steel = mat(0xd4d4d4, { metalness: 1, roughness: 0.25 });
-    const copper = mat(0xb8743a, { metalness: 1, roughness: 0.3 });
-    const nickel = mat(0xdedede, { metalness: 1, roughness: 0.2 });
-    const ivory = mat(0xf8f6ef, { roughness: 0.25 });
-    const ebony = pmat(0x111113, { roughness: 0.3, clearcoat: 0.6 });
-    const felt = mat(0xefe7d3, { roughness: 1 });
-    const darkFelt = mat(0x2d2d30, { roughness: 1 });
-    const pale = mat(0xc8a274, { roughness: 0.6 });
-    const brass = mat(0xd9b04f, { metalness: 1, roughness: 0.2 });
-    const rubber = mat(0x1b1b1b, { roughness: 0.8 });
-    const redFelt = mat(0x7a1b1b, { roughness: 1 });
+    const lacquer = lacquerMat(0x09090b, { roughness: 0.18 });
+    const spruce = wood('spruce', { scale: 3, tint: 0xf6dfb8, clearcoat: 0.4, roughness: 0.55 });
+    const bridgeWood = wood('maple', { scale: 6, tint: 0xd9a070, clearcoat: 0.3 });
+    const gold = metal('gold');
+    const steel = stringMat('steel');
+    const copper = stringMat('copper');
+    const nickel = metal('nickel');
+    const ivory = plastic(0xf8f6ef, 0.22);
+    const ebony = plastic(0x0e0e10, 0.3, { clearcoat: 0.6 });
+    const felt = feltMat(0xefe7d3);
+    const darkFelt = feltMat(0x2d2d30);
+    const pale = wood('mapleNatural', { scale: 30, clearcoat: 0 });
+    const brass = metal('brass');
+    const rubber = rubberMat();
+    const redFelt = feltMat(0x8a1d22);
 
     const { pts: outer, curvePts } = makeOutline();
     const topV = makeTopV(curvePts);

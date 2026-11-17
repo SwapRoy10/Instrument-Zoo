@@ -4,72 +4,89 @@ Interactive website featuring 3D models of various instruments for education pur
 
 **Live site:** https://swaproy10.github.io/Instrument-Zoo/
 
-Explore musical instruments in 3D. Pick an instrument, then rotate and zoom it freely, or choose a part from the **Anatomy** sidebar. The camera flies to that part, highlights it, and shows what it is, why it matters, and a fun fact.
+Explore every instrument of the **symphony orchestra** and the **wind ensemble** in 3D. Pick an instrument, rotate and zoom it freely, or choose a part from the **Anatomy** panel. The camera flies to that part, highlights it, and explains what it is, why it matters, and a fun fact.
 
-Current exhibits: acoustic guitar, violin (with bow), trumpet, grand piano and snare drum.
+## The exhibits (26)
 
-## Run it
+| Section | Instruments |
+| --- | --- |
+| Strings | Violin, Viola, Cello, Double Bass, Concert Harp, Acoustic Guitar (guest exhibit) |
+| Woodwinds | Piccolo, Flute, Oboe, English Horn, E♭ Clarinet, B♭ Clarinet, Bass Clarinet, Bassoon, Contrabassoon, Alto / Tenor / Baritone Saxophone |
+| Brass | French Horn, Trumpet, Trombone, Bass Trombone, Euphonium, Tuba |
+| Percussion | Snare Drum |
+| Keyboards | Grand Piano |
 
-The page uses ES modules, so it has to be served over HTTP (opening `index.html` directly won't work).
+Use the **All / Orchestra / Wind Ensemble** filter to see each ensemble's line-up.
+
+## Run it locally
 
 ```sh
 npm start          # or: node server.js
 ```
 
-Then open http://localhost:5173. There is nothing to install. Three.js loads from a CDN, so you need an internet connection.
+Then open http://localhost:5173. There is nothing to install. Three.js (r170) loads from a CDN, and the page has to be served over HTTP because it uses ES modules.
 
 ## Controls
 
 | Action | How |
 | --- | --- |
-| Rotate | Drag |
-| Zoom | Scroll / pinch |
-| Pan | Right-drag (or two-finger drag) |
-| Select a part | Click it in 3D or in the sidebar |
+| Rotate / zoom / pan | Drag / scroll or pinch / right-drag |
+| Select a part | Click it in 3D or in the Anatomy panel |
 | Step through parts | ↑ / ↓ |
-| Back to overview | Esc or **Overview** |
-| Fade everything else | **Isolate** (or press I) |
+| Previous / next instrument | ← / → |
+| Search instruments | / |
+| Back to overview | Esc |
+| Fade everything else | **Isolate** (or I) |
 
-Every view has a shareable link, e.g. `#/violin/bridge` or `#/piano/hammers`.
+Every view has a shareable link, such as `#/bassoon/bocal` or `#/piano/hammers`.
 
 ## How it's built
 
 ```
-index.html             page shell + import map for three.js
-css/style.css          layout and theme (light & dark)
-js/main.js             sidebar, tabs, deep links, keyboard
-js/viewer.js           3D stage: lighting, orbit controls, camera flights, picking, highlighting
-js/lib/helpers.js      geometry helpers (tubes, lathes, instanced strings, outlines…)
-js/instruments/*.js    one module per instrument
+index.html                  page shell + import map for three.js
+css/style.css               glass UI, section colour themes, light & dark, responsive layouts
+js/main.js                  browser, filters, search, thumbnails, panel, deep links, keyboard
+js/viewer.js                3D stage: studio lighting, framing, camera flights, picking, thumbnails
+js/lib/helpers.js           geometry helpers (tapered tubes, bells, keywork, outlines, instancing)
+js/lib/textures.js          procedural tileable textures (wood grain, flamed maple, metal smudges, felt)
+js/lib/materials.js         PBR material library with triplanar mapping
+js/instruments/builders/    parametric model builders (bowed strings, flute, oboe, clarinet, bassoon, sax, horn, trombone, low brass)
+js/instruments/*.js         instrument definitions and anatomy text
 ```
 
-The models are built in code from simple shapes, so there are no model files to download. Each mesh is tagged with the anatomy part it belongs to.
+The models are built entirely in code, with no model files to download. Realism comes from:
+
+- physically based materials: clear-coated lacquer, polished and brushed metals, iridescent pearl, felt sheen;
+- procedural textures painted at load time and mapped triplanar in object space, so grain always runs along each part;
+- environment lighting with Khronos PBR Neutral tone mapping;
+- soft shadows plus a contact shadow under each instrument.
+
+Thumbnails in the instrument browser are rendered on the fly by a second off-screen renderer and cached in the browser.
 
 ## Adding an instrument
 
-Create `js/instruments/<name>.js` exporting:
+Create a module exporting:
 
 ```js
 export default {
-  id: 'flute', name: 'Flute', emoji: '🪈', family: 'Woodwind · Edge-blown',
+  id: 'celesta', name: 'Celesta', section: 'keyboards', ensembles: ['orchestra'],
+  range: 'C4 – C8', size: '1 m wide',
   blurb: 'One-paragraph intro…',
   defaultView: [0.5, 0.3, 1],          // camera direction for the overview
   parts: [
     {
-      id: 'headjoint', name: 'Head Joint',
+      id: 'hammers', name: 'Hammers',
       what: '…', why: '…', fact: '…',
       view: [0.3, 0.4, 1],             // camera direction when focused (optional)
-      ghost: ['otherPartId'],          // parts to fade while this one is selected (optional)
+      ghost: ['case'],                 // parts to fade while this one is selected (optional)
     },
   ],
   build() {
     const g = new THREE.Group();
-    addPart(g, 'headjoint', someMesh); // tag meshes with their part id
+    addPart(g, 'hammers', someMesh);   // tag meshes with their part id
     return g;
   },
 };
 ```
 
 Then add it to `js/instruments/index.js`. Model in metres; the viewer centres and frames the model automatically.
-
-To use a real `.glb` model instead, load it with three.js's `GLTFLoader` and tag its meshes by name the same way. `build()` is synchronous today, so `Viewer.load` would need a small change to `await` it.

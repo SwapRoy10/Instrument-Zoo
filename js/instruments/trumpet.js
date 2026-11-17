@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { mat, pmat, addPart, v3, cylinderBetween, tube, lathe } from '../lib/helpers.js';
+import { addPart, v3, cylinderBetween, tube, lathe } from '../lib/helpers.js';
+import { metal, pearl as pearlMat, cork as corkMat } from '../lib/materials.js';
 
 // Trumpet lies along +X (mouthpiece at -X, bell at +X). Valves stand upright around x = 0.
 const R = 0.0058;              // main bore tube radius
@@ -11,8 +12,9 @@ const VALVE_X = [-0.035, 0, 0.035];
 export default {
   id: 'trumpet',
   name: 'Trumpet',
-  emoji: '🎺',
-  family: 'Brass · Valved',
+  section: 'brass',
+  ensembles: ['orchestra', 'wind'],
+  range: 'F♯3 – D6 (in B♭, sounds a tone lower)', size: '1.4 m of tubing',
   blurb:
     'About 1.4 metres of brass tubing folded into a compact loop. The sound starts at the player’s lips, which buzz into the mouthpiece. Three valves switch in extra lengths of tubing to change which notes the horn can play.',
   defaultView: [0.3, 0.4, 1],
@@ -78,12 +80,12 @@ export default {
   build() {
     const g = new THREE.Group();
 
-    const brass = pmat(0xe0b04c, { metalness: 1, roughness: 0.18, clearcoat: 0.6, clearcoatRoughness: 0.1 });
-    const brassBell = pmat(0xe0b04c, { metalness: 1, roughness: 0.18, clearcoat: 0.6, side: THREE.DoubleSide });
-    const nickelSilver = mat(0xd9d4c8, { metalness: 1, roughness: 0.22 });
-    const silver = mat(0xeeeeee, { metalness: 1, roughness: 0.12, side: THREE.DoubleSide });
-    const pearl = pmat(0xf6f2ea, { roughness: 0.2, iridescence: 1, iridescenceIOR: 1.5 });
-    const cork = mat(0x9b7652, { roughness: 0.9 });
+    const brass = metal('brass');
+    const brassBell = metal('brass', { side: THREE.DoubleSide });
+    const nickelSilver = metal('nickel');
+    const silver = metal('silver', { side: THREE.DoubleSide });
+    const pearl = pearlMat();
+    const cork = corkMat();
 
     // ----- Mouthpiece & receiver -----
     const mp = lathe(

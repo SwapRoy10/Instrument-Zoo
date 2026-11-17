@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { mat, pmat, addPart, v3, cylinderBetween, roundedBox } from '../lib/helpers.js';
+import { addPart, v3, cylinderBetween, roundedBox } from '../lib/helpers.js';
+import { metal, wood, coatedHead, rubber as rubberMat, dark, matte } from '../lib/materials.js';
 
 const R = 0.1778;        // 14" diameter
 const D = 0.14;          // 5.5" deep
@@ -11,8 +12,9 @@ const N_LUGS = 10;
 export default {
   id: 'snare',
   name: 'Snare Drum',
-  emoji: '🥁',
-  family: 'Percussion · Membrane',
+  section: 'percussion',
+  ensembles: ['orchestra', 'wind'],
+  range: 'Unpitched', size: '14″ × 5½″ drum',
   blurb:
     'A shallow drum with two heads and a set of springy metal wires stretched across the bottom. The wires buzz against the lower head every time the drum is struck. That crisp “crack” drives marching bands, orchestras and almost every rock and pop beat.',
   defaultView: [0.5, 0.75, 1],
@@ -94,17 +96,20 @@ export default {
   build() {
     const g = new THREE.Group();
 
-    const lacquer = pmat(0x8f1a1d, { roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.08, side: THREE.DoubleSide });
-    const chrome = mat(0xf2f2f2, { metalness: 1, roughness: 0.12 });
-    const darkChrome = mat(0x9a9a9a, { metalness: 1, roughness: 0.3 });
-    const coated = mat(0xf2efe6, { roughness: 0.85 });
-    const clear = mat(0xe9e3d6, { roughness: 0.3, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
-    const wireMat = mat(0xcfcfcf, { metalness: 1, roughness: 0.35 });
-    const rubber = mat(0x1d1d1d, { roughness: 0.85 });
-    const hickory = mat(0xe2c08d, { roughness: 0.55 });
-    const black = mat(0x050505, { roughness: 1 });
-    const gold = mat(0xd4b04e, { metalness: 1, roughness: 0.25 });
-    const strap = mat(0x222222, { roughness: 0.9 });
+    const lacquer = new THREE.MeshPhysicalMaterial({
+      color: 0x8f1a1d, roughness: 0.3, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.04,
+      iridescence: 0.25, side: THREE.DoubleSide,
+    });
+    const chrome = metal('chrome');
+    const darkChrome = metal('darkSteel');
+    const coated = coatedHead();
+    const clear = new THREE.MeshPhysicalMaterial({ color: 0xe9e3d6, roughness: 0.25, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
+    const wireMat = metal('steel');
+    const rubber = rubberMat(0x1d1d1d);
+    const hickory = wood('hickory', { scale: 20, clearcoat: 0.3, roughness: 0.5 });
+    const black = dark();
+    const gold = metal('gold');
+    const strap = matte(0x222222);
 
     // ----- Shell -----
     const shell = new THREE.Mesh(new THREE.CylinderGeometry(R, R, D, 72, 1, true), lacquer);

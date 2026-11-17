@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import {
-  mat, pmat, addPart, v3, cylinderBetween, roundedBox, smoothOutline, mirrorOutline, outlineTube,
+  addPart, v3, cylinderBetween, roundedBox, smoothOutline, mirrorOutline, outlineTube,
 } from '../lib/helpers.js';
+import { wood, metal, plastic, pearl as pearlMat, stringMat, dark as darkMat } from '../lib/materials.js';
 
 // Layout (metres): guitar stands upright, soundboard faces +Z, saddle at y = SADDLE.
 const SCALE = 0.645;          // scale length: nut to saddle
@@ -12,8 +13,9 @@ const fretY = (n) => SADDLE + SCALE / Math.pow(2, n / 12);
 export default {
   id: 'guitar',
   name: 'Acoustic Guitar',
-  emoji: '🎸',
-  family: 'Strings · Plucked',
+  section: 'strings',
+  ensembles: [],
+  range: 'E2 – B5', size: '1 m long',
   blurb:
     'A hollow wooden box with six steel strings. Plucking a string sends its vibration through the bridge into a thin spruce top, which acts like a loudspeaker cone and pushes the sound out into the room.',
   defaultView: [0.55, 0.2, 1],
@@ -114,20 +116,20 @@ export default {
   build() {
     const g = new THREE.Group();
 
-    const rosewood = pmat(0x5a2a14, { roughness: 0.35, clearcoat: 0.8, clearcoatRoughness: 0.2 });
-    const spruce = pmat(0xd3a262, { roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.3 });
-    const mahogany = pmat(0x6e3517, { roughness: 0.4, clearcoat: 0.5 });
-    const ebony = mat(0x1c1512, { roughness: 0.45 });
-    const bridgeWood = mat(0x231611, { roughness: 0.4 });
-    const bone = mat(0xf1e8d4, { roughness: 0.35 });
-    const cream = mat(0xeee2c4, { roughness: 0.4 });
-    const pearl = pmat(0xf4f1ea, { roughness: 0.2, iridescence: 1, iridescenceIOR: 1.6 });
-    const nickel = mat(0xdadada, { metalness: 1, roughness: 0.22 });
-    const fretMetal = mat(0xd4d0c8, { metalness: 1, roughness: 0.25 });
-    const bronze = mat(0xc4945a, { metalness: 1, roughness: 0.3 });
-    const dark = mat(0x070504, { roughness: 1 });
-    const rosetteMat = mat(0x2e1d12, { roughness: 0.5 });
-    const tortoise = pmat(0x2a1107, { roughness: 0.3, clearcoat: 1 });
+    const rosewood = wood('rosewood', { scale: 4, clearcoat: 1, clearcoatRoughness: 0.1, roughness: 0.4 });
+    const spruce = wood('spruce', { scale: 11, tint: 0xf4dcb6, clearcoat: 1, clearcoatRoughness: 0.08, roughness: 0.45 });
+    const mahogany = wood('mahogany', { scale: 5, clearcoat: 0.8, clearcoatRoughness: 0.15 });
+    const ebony = wood('ebony', { scale: 8, clearcoat: 0.2, roughness: 0.45 });
+    const bridgeWood = wood('rosewood', { scale: 10, tint: 0x8a6a5a, clearcoat: 0.2, roughness: 0.5 });
+    const bone = plastic(0xf1e8d4, 0.35);
+    const cream = plastic(0xeee2c4, 0.4);
+    const pearl = pearlMat();
+    const nickel = metal('nickel');
+    const fretMetal = metal('nickel');
+    const bronze = stringMat('bronze');
+    const dark = darkMat();
+    const rosetteMat = wood('ebony', { scale: 30, roughness: 0.5 });
+    const tortoise = plastic(0x2a1107, 0.25, { clearcoat: 1 });
 
     // ----- Body outline -----
     const outline = smoothOutline(
