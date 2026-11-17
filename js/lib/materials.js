@@ -59,6 +59,8 @@ const WOODS = {
   hickory: { light: 0xeed6a8, dark: 0xc79c63, rings: 20, wobble: 0.15, sharp: 3, pores: 0.01, seed: 13 },
   harp: { light: 0xe6bf86, dark: 0xb07c42, rings: 12, wobble: 0.3, sharp: 2, flame: 0.4, seed: 14 },
   cane: { light: 0xead09a, dark: 0xd2ae6a, rings: 60, wobble: 0.04, sharp: 4, seed: 15 },
+  honduras: { light: 0xa85a32, dark: 0x5f2a14, rings: 18, wobble: 0.32, sharp: 1.8, pores: 0.025, seed: 16 }, // marimba bars
+  cherry: { light: 0x9a4e2c, dark: 0x5e2a16, rings: 12, wobble: 0.18, sharp: 2, pores: 0.015, seed: 17 },
 };
 
 /**
@@ -129,6 +131,12 @@ export function pad() {
 export function coatedHead() {
   const tex = grainNoiseTexture('coated', { base: 0xf3efe6, contrast: 0.08, freq: 96 });
   return physical({ color: 0xffffff, map: tex.map, roughnessMap: tex.roughnessMap, roughness: 0.85 }, 8);
+}
+
+/** Natural calfskin drumhead: creamy, slightly blotchy and translucent-looking. */
+export function calfskin(color = 0xeadcbc) {
+  const tex = grainNoiseTexture('calf', { base: 0xffffff, contrast: 0.2, freq: 20, seed: 23 });
+  return physical({ color, map: tex.map, roughnessMap: tex.roughnessMap, roughness: 0.7, sheen: 0.4, sheenRoughness: 0.6, sheenColor: new THREE.Color(0xfff3dc) }, 3);
 }
 
 export function cane() {

@@ -8,6 +8,8 @@ import { ebClarinet, clarinet, bassClarinet, altoSax, tenorSax, bariSax } from '
 import { frenchHorn, trombone, bassTrombone, euphonium, tuba } from './brass.js';
 import trumpet from './trumpet.js';
 import snare from './snare.js';
+import { timpani, bassDrum } from './drums.js';
+import { glockenspiel, xylophone, marimba } from './keyboardPercussion.js';
 import piano from './piano.js';
 
 export const SECTIONS = [
@@ -29,6 +31,6 @@ export const instruments = [
   violin, viola, cello, doubleBass, harp, guitar,
   piccolo, flute, oboe, englishHorn, ebClarinet, clarinet, bassClarinet, bassoon, contrabassoon, altoSax, tenorSax, bariSax,
   frenchHorn, trumpet, trombone, bassTrombone, euphonium, tuba,
-  snare,
+  timpani, snare, bassDrum, glockenspiel, xylophone, marimba,
   piano,
 ];

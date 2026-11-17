@@ -6,17 +6,17 @@ Interactive website featuring 3D models of various instruments for education pur
 
 Explore every instrument of the **symphony orchestra** and the **wind ensemble** in 3D. Pick an instrument, rotate and zoom it freely, or choose a part from the **Anatomy** panel. The camera flies to that part, highlights it, and explains what it is, why it matters, and a fun fact.
 
-## The exhibits (26)
+## The exhibits (31)
 
 | Section | Instruments |
 | --- | --- |
 | Strings | Violin, Viola, Cello, Double Bass, Concert Harp, Acoustic Guitar (guest exhibit) |
 | Woodwinds | Piccolo, Flute, Oboe, English Horn, E♭ Clarinet, B♭ Clarinet, Bass Clarinet, Bassoon, Contrabassoon, Alto / Tenor / Baritone Saxophone |
 | Brass | French Horn, Trumpet, Trombone, Bass Trombone, Euphonium, Tuba |
-| Percussion | Snare Drum |
+| Percussion | Timpani, Snare Drum, Bass Drum, Glockenspiel, Xylophone, Marimba |
 | Keyboards | Grand Piano |
 
-Use the **All Instruments / Orchestra / Wind Ensemble** tabs at the top to see each ensemble's line-up, then move through it with the faded preview cards on either side of the stage (or the ← / → keys). The clicked preview grows into the spotlight while the current instrument shrinks into the opposite slot, then the live 3D model fades in over the picture. The **Catalogue** lists the whole line-up for jumping straight to an instrument.
+Use the tabs at the top (**All Instruments**, or a single family: **Strings**, **Woodwinds**, **Brass**, **Percussion**, **Keyboards**) to choose a line-up, then move through it with the faded preview cards on either side of the stage (or the ← / → keys). The clicked preview grows into the spotlight while the current instrument shrinks into the opposite slot, then the live 3D model fades in over the picture. The **Catalogue** lists the whole line-up for jumping straight to an instrument.
 
 ## Run it locally
 

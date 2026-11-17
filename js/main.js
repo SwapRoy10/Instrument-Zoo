@@ -43,8 +43,10 @@ const rotateBtn = $('#btn-rotate');
 const peekPrev = $('#peek-prev');
 const peekNext = $('#peek-next');
 
-let filter = store.get('iz-filter') || 'all';
-if (!ENSEMBLES[filter]) filter = 'all';
+// Tabs: everything, then one per instrument family (in score order).
+const TABS = [{ id: 'all', name: 'All Instruments' }, ...SECTIONS];
+let filter = store.get('iz-family') || 'all';
+if (!TABS.some((t) => t.id === filter)) filter = 'all';
 let current = null;
 let selected = null;
 let busy = false;
@@ -52,7 +54,7 @@ let pending = null;
 let insets = { left: 0, right: 0, top: 0, bottom: 0 };
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-const lineup = () => (filter === 'all' ? instruments : instruments.filter((i) => i.ensembles.includes(filter)));
+const lineup = () => (filter === 'all' ? instruments : instruments.filter((i) => i.section === filter));
 const neighbours = () => {
   const l = lineup();
   const i = Math.max(0, l.indexOf(current));
@@ -144,12 +146,12 @@ function setImg(img, url) {
 // ===========================================================================
 const tabsEl = $('#tabs');
 const ink = $('#tab-ink');
-Object.entries(ENSEMBLES).forEach(([id, label]) => {
-  const b = el('button', 'tab', label);
+TABS.forEach(({ id, name }) => {
+  const b = el('button', 'tab', name);
   b.type = 'button';
   b.dataset.id = id;
   b.setAttribute('role', 'tab');
-  const count = id === 'all' ? instruments.length : instruments.filter((i) => i.ensembles.includes(id)).length;
+  const count = id === 'all' ? instruments.length : instruments.filter((i) => i.section === id).length;
   b.append(el('span', 'n', String(count)));
   b.addEventListener('click', () => setFilter(id));
   tabsEl.append(b);
@@ -162,12 +164,16 @@ function moveInk() {
   const pad = Math.max(0, parseFloat(getComputedStyle(tab).paddingLeft) - 4);
   ink.style.left = `${tab.offsetLeft + pad}px`;
   ink.style.width = `${tab.offsetWidth - 2 * pad}px`;
+  // on narrow screens the tab row scrolls; keep the chosen tab in view
+  if (tabsEl.scrollWidth > tabsEl.clientWidth) {
+    tabsEl.scrollTo({ left: tab.offsetLeft - (tabsEl.clientWidth - tab.offsetWidth) / 2, behavior: 'smooth' });
+  }
 }
 
 function setFilter(id) {
   if (id === filter) return;
   filter = id;
-  store.set('iz-filter', id);
+  store.set('iz-family', id);
   moveInk();
   if (!lineup().includes(current)) navigate(lineup()[0], null, 0);
   else updateStageLabels(true);
@@ -372,6 +378,7 @@ function prepareNeighbours() {
 
 function step(delta) {
   const n = neighbours();
+  if (n.list.length < 2) return;
   navigate(delta > 0 ? n.next : n.prev, null, delta);
 }
 
@@ -400,6 +407,7 @@ function showNotes() {
 
 function updateStageLabels(animate) {
   const n = neighbours();
+  app.classList.toggle('solo', n.list.length < 2); // nothing to step to (e.g. Keyboards)
   $('#plaque-section').textContent = sectionName(current.section);
   $('#plaque-name').textContent = current.name;
   const fill = (peek, inst) => {
