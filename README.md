@@ -2,6 +2,8 @@
 
 Interactive website featuring 3D models of various instruments for education purposes.
 
+**Live site:** https://swaproy10.github.io/Instrument-Zoo/
+
 Explore musical instruments in 3D. Pick an instrument, then rotate and zoom it freely, or choose a part from the **Anatomy** sidebar. The camera flies to that part, highlights it, and shows what it is, why it matters, and a fun fact.
 
 Current exhibits: acoustic guitar, violin (with bow), trumpet, grand piano and snare drum.
